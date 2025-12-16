@@ -68,17 +68,6 @@ Defined in `pyproject.toml`:
   * **Tab Must Stay Open:** Since the browser *is* the file server, closing the tab kills the site.
   * **Read-Only:** This implementation allows the public web to *read* your files, but currently does not support *writing* back to your disk (though the API supports it).
 
-## 🛠 Project Structure
-
-```python
-# main.py
-# The Traffic Cop. It holds open HTTP requests from the outside world
-# and waits for the specific Admin Client to fulfill them.
-```
-
-```html
-```
-
 ## 📄 License
 
 MIT. Go wild.
