@@ -1,0 +1,12 @@
+[project]
+name = "browserver"
+version = "0.1.0"
+description = "Browserver is a reverse web server: your browser becomes the file host, streaming files from your local disk to the public web in real-time via a FastAPI tunnel."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "coolname>=2.2.0",
+    "fastapi>=0.124.4",
+    "sse-starlette>=3.0.4",
+    "uvicorn>=0.38.0",
+]
