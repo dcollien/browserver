@@ -2,104 +2,209 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>File Tunnel Host</title>
+    <title>Browserver Admin</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; }
-        .log { background: #f0f0f0; padding: 10px; height: 300px; overflow-y: scroll; border: 1px solid #ccc; font-family: monospace; }
-        .status { margin-bottom: 20px; padding: 15px; border-radius: 4px; border: 1px solid #ddd;}
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #f9f9f9; }
+        h1, h2 { margin-bottom: 10px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        
+        /* Status Bar */
+        .status { padding: 15px; border-radius: 4px; border: 1px solid #ddd; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;}
         .status.connected { background-color: #d4edda; color: #155724; border-color: #c3e6cb;}
         .status.disconnected { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb;}
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-        .link-box { margin-top: 10px; font-weight: bold; word-break: break-all; }
-        a { color: #0056b3; }
+        
+        /* Route Table */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
+        input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 8px 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #0056b3; }
+        button.remove { background: #dc3545; }
+        button.remove:hover { background: #a71d2a; }
+
+        .log { background: #333; color: #0f0; padding: 15px; height: 250px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
     </style>
 </head>
 <body>
 
-    <h1>📂 Local File Host</h1>
+    <h1>🌐 Browserver</h1>
     
     <div id="connectionStatus" class="status disconnected">
-        <div><strong>Status: Disconnected</strong></div>
-        <div class="link-box">
-            Your Public URL: <span id="publicUrl">Waiting...</span>
+        <span><strong>Status:</strong> Disconnected</span>
+        <span id="publicUrl">...</span>
+    </div>
+
+    <div class="card">
+        <h2>🔀 Routing Table</h2>
+        <p>Map URL paths to local folders or localhost ports.</p>
+        <table id="routeTable">
+            <thead>
+                <tr>
+                    <th style="width: 25%">Path Prefix</th>
+                    <th style="width: 15%">Type</th>
+                    <th>Target</th>
+                    <th style="width: 10%">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr id="fs-route-row">
+                    <td>/</td>
+                    <td><strong>File System</strong></td>
+                    <td id="fs-status">No folder selected</td>
+                    <td><button id="selectDirBtn">Select</button></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+            <h3>Add Service (Proxy)</h3>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="newPath" placeholder="/api" value="/api">
+                <input type="text" id="newTarget" placeholder="http://localhost:3000" value="http://localhost:3000">
+                <button id="addRouteBtn">Add Route</button>
+            </div>
+            <p style="font-size: 0.8em; color: #666;">Note: Local services must allow CORS (e.g. <code>Access-Control-Allow-Origin: *</code>)</p>
         </div>
     </div>
 
-    <button id="selectDirBtn">Select Directory to Host</button>
-
-    <h3>Activity Log</h3>
-    <div id="log" class="log"></div>
+    <div class="log" id="log"></div>
 
     <script>
-        let dirHandle;
+        let dirHandle = null;
+        let routes = []; // Stores { path: "/api", type: "proxy", target: "http://..." }
+        
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('connectionStatus');
         const publicUrlEl = document.getElementById('publicUrl');
 
-        // 1. EXTRACT CLIENT ID FROM URL
-        // URL is: http://host/admin/{UUID}
+        // --- SETUP ---
         const pathParts = window.location.pathname.split('/');
         const clientId = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2]; 
-
-        if (clientId == "admin" || !clientId) {
-            alert("Invalid client ID in URL.");
-            throw new Error("Invalid client ID in URL.");
-        }
         
-        // Display the calculated public link
-        const publicLink = `${window.location.origin}/${clientId}/`;
-        publicUrlEl.innerHTML = `<a href="${publicLink}" target="_blank">${publicLink}</a>`;
+        if (clientId === "admin" || !clientId) { throw new Error("Invalid ID"); }
 
+        const publicLink = `${window.location.origin}/${clientId}/`;
+        publicUrlEl.innerHTML = `<a href="${publicLink}" target="_blank" style="color: inherit;">${publicLink}</a>`;
+        
+        connectToSSE();
+
+        // --- LOGGING ---
         function log(msg) {
             const entry = document.createElement('div');
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            entry.textContent = `> ${msg}`;
             logEl.prepend(entry);
         }
 
+        // --- ROUTING LOGIC ---
+        
+        // 1. File System Selection
         document.getElementById('selectDirBtn').addEventListener('click', async () => {
             try {
                 dirHandle = await window.showDirectoryPicker();
-                log(`Hosting directory: ${dirHandle.name}`);
-                connectToSSE();
-            } catch (err) {
-                if (err.name === 'AbortError') {
-                    log("Directory selection cancelled.");
-                } else if (err.name === 'NotAllowedError') {
-                    log("Permission denied to access directory.");
-                } else if (err.name === 'TypeError') {
-                    log("Directory Picker API not supported in this browser.");
-                } else {
-                    log(`Unexpected error: ${err.message}`);
-                }
-            }
+                document.getElementById('fs-status').textContent = `📂 ${dirHandle.name}`;
+                document.getElementById('selectDirBtn').textContent = "Change";
+                log(`Mounted: ${dirHandle.name} at /`);
+            } catch (err) { log(`Error: ${err.message}`); }
         });
 
-        function connectToSSE() {
-            // 2. CONNECT TO NAMESPACED ENDPOINT
-            const evtSource = new EventSource(`/admin/${clientId}/events`);
+        // 2. Add Proxy Route
+        document.getElementById('addRouteBtn').addEventListener('click', () => {
+            const path = document.getElementById('newPath').value.trim();
+            const target = document.getElementById('newTarget').value.trim();
+            if(!path || !target) return;
 
+            addRouteRow(path, target);
+            routes.push({ path, target });
+            log(`Added proxy: ${path} -> ${target}`);
+        });
+
+        function addRouteRow(path, target) {
+            const tbody = document.querySelector('#routeTable tbody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${path}</td>
+                <td>Proxy</td>
+                <td>${target}</td>
+                <td><button class="remove" onclick="removeRoute(this, '${path}')">Remove</button></td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        window.removeRoute = (btn, path) => {
+            routes = routes.filter(r => r.path !== path);
+            btn.closest('tr').remove();
+            log(`Removed route: ${path}`);
+        };
+
+        // --- REQUEST HANDLING ---
+
+        function connectToSSE() {
+            const evtSource = new EventSource(`/admin/${clientId}/events`);
             evtSource.onopen = () => {
                 statusEl.classList.replace("disconnected", "connected");
-                statusEl.querySelector('strong').textContent = "Status: Online & Ready";
-                log("Connected to server.");
+                statusEl.querySelector('span').innerHTML = "<strong>Status:</strong> Online";
             };
-
-            evtSource.onerror = () => {
-                statusEl.classList.replace("connected", "disconnected");
-                statusEl.querySelector('strong').textContent = "Status: Disconnected";
-                log("Connection lost.");
-            };
-
             evtSource.addEventListener("request_file", async (event) => {
                 const req = JSON.parse(event.data);
-                await handleFileRequest(req.id, req.path);
+                await router(req);
             });
         }
 
-        async function handleFileRequest(reqId, filePath) {
-            if (!dirHandle) return;
+        async function router(req) {
+            const fullPath = "/" + req.path; // Ensure leading slash
+            
+            // 1. Check for Proxy Match (Longest prefix match usually better, simple linear here)
+            const proxyRoute = routes.find(r => fullPath.startsWith(r.path));
+            
+            if (proxyRoute) {
+                // Determine subpath: /api/users -> /users (if mapped to root)
+                // Or keep it simple: Append remaining path to target
+                const subPath = fullPath.substring(proxyRoute.path.length);
+                // Handle slash consistency
+                const targetUrl = proxyRoute.target.replace(/\/$/, '') + "/" + subPath.replace(/^\//, '');
+                
+                log(`[Proxy] ${req.path} -> ${targetUrl}`);
+                await handleProxyRequest(req.id, targetUrl);
+            } else {
+                // 2. Fallback to File System
+                log(`[File] ${req.path}`);
+                await handleFileRequest(req.id, req.path);
+            }
+        }
+
+        async function handleProxyRequest(reqId, targetUrl) {
             try {
-                const parts = filePath.split('/').filter(p => p && p !== '.');
+                // Fetch from localhost
+                const res = await fetch(targetUrl);
+                const blob = await res.blob();
+                const contentType = res.headers.get("content-type");
+
+                // Upload back to tunnel
+                await fetch(`/admin/${clientId}/upload/${reqId}`, {
+                    method: 'POST',
+                    body: blob,
+                    headers: { 
+                        'Content-Type': 'application/octet-stream', // Transport type
+                        'X-Content-Type': contentType || 'text/plain' // Real type header
+                    }
+                });
+            } catch (err) {
+                log(`Proxy Error: ${err.message} (CORS?)`);
+                await fetch(`/admin/${clientId}/error/${reqId}`, { method: 'POST' });
+            }
+        }
+
+        async function handleFileRequest(reqId, filePath) {
+            if (!dirHandle) {
+                await fetch(`/admin/${clientId}/error/${reqId}`, { method: 'POST' });
+                return;
+            }
+
+            try {
+                // Treat empty path as index.html for file system
+                const cleanPath = (filePath === "" || filePath === "/") ? "index.html" : filePath;
+                
+                const parts = cleanPath.split('/').filter(p => p && p !== '.');
                 let currentHandle = dirHandle;
                 
                 for (let i = 0; i < parts.length - 1; i++) {
@@ -108,18 +213,21 @@
                 
                 const fileHandle = await currentHandle.getFileHandle(parts[parts.length - 1]);
                 const fileData = await fileHandle.getFile();
-                const arrayBuffer = await fileData.arrayBuffer();
+                
+                // For files, we let the browser guess mime type or send null
+                const contentType = fileData.type; 
 
-                // 3. UPLOAD TO NAMESPACED ENDPOINT
                 await fetch(`/admin/${clientId}/upload/${reqId}`, {
                     method: 'POST',
-                    body: arrayBuffer,
-                    headers: { 'Content-Type': 'application/octet-stream' }
+                    body: await fileData.arrayBuffer(),
+                    headers: { 
+                        'Content-Type': 'application/octet-stream',
+                        'X-Content-Type': contentType || ''
+                    }
                 });
-                
-                log(`[200] Served: ${filePath}`);
+
             } catch (err) {
-                log(`[404] File not found: ${filePath}`);
+                log(`File Error: ${err.message}`);
                 await fetch(`/admin/${clientId}/error/${reqId}`, { method: 'POST' });
             }
         }
